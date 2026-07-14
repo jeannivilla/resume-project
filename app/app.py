@@ -1,6 +1,6 @@
 import os
 import psycopg2
-from flask import Flask
+from flask import Flask, request, make_response
 
 app = Flask(__name__)
 
@@ -15,22 +15,47 @@ def get_db_connection():
 
 @app.route("/")
 def index():
+    already_visited = request.cookies.get("visited")
+
     conn = get_db_connection()
     cur = conn.cursor()
 
-    cur.execute("""
-        UPDATE visitor_counter
-        SET count = count + 1
-        WHERE id = 1
-        RETURNING count;
-    """)
-    count = cur.fetchone()[0]
+    if already_visited:
+        # Returning visitor: bump total count only
+        cur.execute("""
+            UPDATE visitor_counter
+            SET count = count + 1
+            WHERE id = 1
+            RETURNING count, unique_count;
+        """)
+    else:
+        # New visitor: bump both total and unique counts
+        cur.execute("""
+            UPDATE visitor_counter
+            SET count = count + 1, unique_count = unique_count + 1
+            WHERE id = 1
+            RETURNING count, unique_count;
+        """)
 
+    count, unique_count = cur.fetchone()
     conn.commit()
     cur.close()
     conn.close()
 
-    return f"Hello world! Visitor count: {count}"
+    html = f"""
+    <html>
+        <body style="font-family: sans-serif; text-align: center; margin-top: 100px;">
+            <h1>Hello world!</h1>
+            <h2>Total visits: {count}</h2>
+            <h3>Unique visitors: {unique_count}</h3>
+        </body>
+    </html>
+    """
+
+    resp = make_response(html)
+    if not already_visited:
+        resp.set_cookie("visited", "true", max_age=60 * 60 * 24 * 365)  # 1 year
+    return resp
 
 @app.route("/health")
 def health():
